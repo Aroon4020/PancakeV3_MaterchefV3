@@ -36,15 +36,17 @@ interface IZap {
 
     function zapOut(
         address vault, 
-        uint256 amount,
+        uint128 amount,
         uint256 amount0Min, 
         uint256 amount1Min
     ) external;
 
     function zapOutAndSwap(
         address vault,
-        uint256 amount,
+        uint128 amount,
         address desiredToken,
+        uint256 amountOut0Min,
+        uint256 amountOut1Min,
         uint256 desiredTokenOutMin
     ) external;
 
