@@ -3,11 +3,10 @@ pragma solidity ^0.7.6;
 pragma abicoder v2;
 import "@pancakeswap/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
 import "@pancakeswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
-
+import "@uniswap/lib/contracts/libraries/Babylonian.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/math/Math.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -20,41 +19,61 @@ import "./interfaces/IVault.sol";
 import "./libraries/Swap.sol";
 
 import "./libraries/Liquidity.sol";
+import "./vaultToken/ERC20.sol";
 
 contract Vault is ERC20, IVault, Ownable, Pausable {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    int24 public override tickLower;
-    int24 public override tickUpper;
+    
     address public override pool;
-    address public masterchefV3;
-    address public cake;
-    address public router;
-    uint24 public override fee;
-    address treasury0;
-    address treasury1;
-    uint256 public constant FEE = 250;
-    uint256 public constant REMAINING_AMOUNT = 9500;
-    uint public constant MINIMUM_LIQUIDITY = 10 ** 3;
+    uint256 public immutable FEE = 250;
+    uint256 public immutable REMAINING_AMOUNT = 9500;
+    uint256 public immutable MINIMUM_LIQUIDITY = 10 ** 3;
+    address public immutable masterchefV3 = 0x556B9306565093C855AEA9AE92A594704c2Cd59e;
+    address public immutable cake = 0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82;
+    address public immutable positionManager = 0x46A15B0b27311cedF172AB29E4f4766fbE7F4364;
+    address public immutable WETH = 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
+    address public constant router = 0x13f4EA83D0bd40E75C8222255bc855a974568Dd4;
+    address public immutable treasury0 = 0x723a2e7E926A8AFc5871B8962728Cb464f698A54;
+    address public immutable treasury1 = 0x723a2e7E926A8AFc5871B8962728Cb464f698A54;
+    uint24  public immutable override fee;
+    int24   public immutable override tickLower;
+    int24   public immutable override tickUpper;
     uint256 public override tokenId;
-    address public positionManager = 0x46A15B0b27311cedF172AB29E4f4766fbE7F4364;
-    address WETH;
     address public override token0;
     address public override token1;
+    //address[] public route;
 
     constructor(
+        string memory _name,
+        string memory _symbol,
         int24 _tickLower,
         int24 _tickUpper,
-        address _pool,
-        address _masterchefV3,
-        uint24 _fee
-    ) ERC20("CFLOW", "CF") {
+        address _pool
+        //address[] memory _route,
+    ) ERC20(_name, _symbol,18) {
         tickLower = _tickLower;
         tickUpper = _tickUpper;
         pool = _pool;
-        masterchefV3 = _masterchefV3;
-        fee = _fee;
+        fee = IPancakeV3Pool(pool).fee();
+        token0 = IPancakeV3Pool(pool).token0();
+        token1 = IPancakeV3Pool(pool).token1();
+        IERC20(token0).safeApprove(
+                router,
+                uint256(type(uint256).max)
+            );
+        IERC20(token1).safeApprove(
+                router,
+                uint256(type(uint256).max)
+            );    
+        // for (uint256 i; i < _approveToken.length; ++i) {
+        //     IERC20(_approveToken[i]).safeApprove(
+        //         router,
+        //         uint256(type(uint256).max)
+        //     );
+        // }
+        //route = _route;
         _pause();
     }
 
@@ -89,14 +108,16 @@ contract Vault is ERC20, IVault, Ownable, Pausable {
         ) = INonfungiblePositionManager(positionManager).mint{value: msg.value}(
                 params
             );
+        INonfungiblePositionManager(positionManager).approve(masterchefV3,_tokenId);    
         INonfungiblePositionManager(positionManager).transferFrom(
             address(this),
             masterchefV3,
             _tokenId
         );
-        calculateshareAmount(amount0, amount1);
-        _unpause();
+        uint256 shareAmount = calculateshareAmount(amount0, amount1);
+        _mint(msg.sender, shareAmount);
         tokenId = _tokenId;
+        _unpause();
     }
 
     function addLiquidity(
@@ -133,6 +154,7 @@ contract Vault is ERC20, IVault, Ownable, Pausable {
         whenNotPaused
         returns (uint256 amount0, uint256 amount1)
     {
+        _burn(msg.sender, uint256(amount));
         IMCV3.DecreaseLiquidityParams memory decreaseLiquidityParams = IMCV3
             .DecreaseLiquidityParams({
                 tokenId: tokenId,
@@ -149,18 +171,17 @@ contract Vault is ERC20, IVault, Ownable, Pausable {
         IMCV3.CollectParams memory collectParams = IMCV3.CollectParams({
             tokenId: tokenId,
             recipient: recipient,
-            amount0Max: uint128(amount0),
-            amount1Max: uint128(amount1)
+            amount0Max: uint128(type(uint128).max),
+            amount1Max: uint128(type(uint128).max)
         });
 
-        (amount0, amount1) = IMCV3(masterchefV3).collect(collectParams);
-        _burn(msg.sender, uint256(amount));
+        (amount0, amount1) = IMCV3(masterchefV3).collectTo(collectParams,recipient);
     }
 
     function harvest(
         uint256 amountOut0,
         uint256 amountOut1,
-        bytes calldata route
+        bytes calldata _route
     ) external override whenNotPaused {
         IMCV3(masterchefV3).harvest(tokenId, address(this));
         address _cake = cake;
@@ -174,11 +195,11 @@ contract Vault is ERC20, IVault, Ownable, Pausable {
             Swap.batchSwap(
                 IERC20(_cake).balanceOf(address(this)),
                 amountOut0,
-                route,
+                _route,
                 router
             ); //route cake-to-lp1/lp0
             _arrangeAddliquidityObject(
-                abi.decode(route[20:40], (address)),
+                abi.decode(_route[20:40], (address)),
                 lpToken0,
                 lpToken1,
                 amountOut1
@@ -314,9 +335,10 @@ contract Vault is ERC20, IVault, Ownable, Pausable {
         uint256 amount0,
         uint256 amount1
     ) internal returns (uint256 share) {
-        uint256 supply = totalSupply();
+        uint256 supply = totalSupply;
         if (supply == 0) {
-            _mint(address(0), MINIMUM_LIQUIDITY);
+            share = Babylonian.sqrt(amount0.mul(amount1)).sub(MINIMUM_LIQUIDITY);
+            _mint(address(0), MINIMUM_LIQUIDITY); // permanently lock the first MINIMUM_SHARE tokens
         }
         (uint256 res0, uint256 res1) = Liquidity.getAmountsForLiquidity(
             pool,

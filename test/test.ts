@@ -7,38 +7,82 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { parse } from "path";
 import { parseEther } from "ethers";
+import { ethers } from "hardhat";
+import { expect } from "chai";
+async function _advanceBlock() {
+  return ethers.provider.send("evm_mine", []);
+}
 
-describe("Lock", function () {
-  // We define a fixture to reuse the same setup in every test.
-  // We use loadFixture to run this setup once, snapshot that state,
-  // and reset Hardhat Network to that snapshot in every test.
-  async function deployOneYearLockFixture() {
-    
-
-    const Lock = await ethers.getContractFactory("Zap");
-    const lock = await Lock.deploy();
-
-    return { lock};
+async function advanceBlock(blockNumber: number) {
+  for (let i = await ethers.provider.getBlockNumber(); i < blockNumber; i++) {
+    await _advanceBlock();
   }
-  // {
-//   "params": {
-//     "token0": "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82",
-//     "token1": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-//     "fee": "2500",
-//     "recipient": "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364",
-//     "tickLower": "-58800",
-//     "tickUpper": "-44650",
-//     "amount0Desired": "7484306923351542599",
-//     "amount1Desired": "43716062563075024",
-//     "amount0Min": "7421086683645874612",
-//     "amount1Min": "43352522630858096"
-//   }
-// }
+}
 
-  describe("Deployment", function () {
-    it("test",async () => {
-      const { lock } = await loadFixture(deployOneYearLockFixture);
-      await lock.zapIn("0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c","0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82",2500,-58800,-44300, parseEther("1"),0,{value:parseEther("1")});
+async function advanceBlockTo(blockNumber: number) {
+  let currentBlock = await ethers.provider.getBlockNumber();
+  let moveTo = currentBlock + blockNumber;
+  //console.log("From: ", currentBlock.toString(), "To: ", moveTo.toString());
+  await advanceBlock(moveTo);
+}
+async function deployZAP() {
+  const ZAP = await ethers.getContractFactory("Zap");
+  const zap = await ZAP.deploy();
+  return { zap };
+}
+
+async function deploy_CAKE_ETH_Vault() {
+  let name = "A";
+  let sysmbol = "B";
+  let tickLower = "111";
+  let tickUpper = "111";
+  let pool = "0x133B3D95bAD5405d14d53473671200e9342896BF"
+  // let route0 = [
+  //   "0xd4d42F0b6DEF4CE0383636770eF773390d85c61A",
+  //   "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+  // ];
+  // let approveToken = [
+  //   "0x3082CC23568eA640225c2467653dB90e9250AaA0",
+  //   "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+  //   "0xd4d42F0b6DEF4CE0383636770eF773390d85c61A",
+  // ];
+  const [user0] = await ethers.getSigners();
+  const SwapLib = await ethers.getContractFactory("Swap");
+  const swaplib = await SwapLib.deploy();
+  let a = await swaplib.getAddress();
+  console.log(a);
+  console.log(swaplib);
+  // const LiquidityLib = await ethers.getContractFactory("Liquidity");
+  // const liquiditylib = await LiquidityLib.deploy();
+  //liquiditylib.address
+  //await liquiditylib.deployed
+  // const VAULT = await ethers.getContractFactory("Vault",{
+  //   libraries:{
+  //     Liquidity:"0x133B3D95bAD5405d14d53473671200e9342896BF",
+  //     Swap:"0x133B3D95bAD5405d14d53473671200e9342896BF",
+  //   },
+  // });
+  // const vault = await VAULT.deploy(
+  //   name,
+  //   sysmbol,
+  //   tickLower,
+  //   tickUpper,
+  //   pool,
+  // );
+  //await ethers.provider.getSigner().link(vault.address, swaplib.address,liquiditylib.address);
+  //vault.address
+  // const [, signer0] = await ethers.getSigners();
+  // const txSigner0 = vault.connect(signer0);
+
+  return { swaplib};
+}
+
+
+
+  describe("ZAP and VAULT", function () {
+    it("test Vault",async () => {
+      const { vault } = await loadFixture(deploy_CAKE_ETH_Vault);
+      //await lock.zapIn("0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c","0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82",2500,-58800,-44300, parseEther("1"),0,{value:parseEther("1")});
     })
     // it("Should set the right unlockTime", async function () {
     //   const { lock, unlockTime } = await loadFixture(deployOneYearLockFixture);
@@ -72,69 +116,4 @@ describe("Lock", function () {
     // });
   });
 
-  // describe("Withdrawals", function () {
-  //   describe("Validations", function () {
-  //     it("Should revert with the right error if called too soon", async function () {
-  //       const { lock } = await loadFixture(deployOneYearLockFixture);
-
-  //       await expect(lock.withdraw()).to.be.revertedWith(
-  //         "You can't withdraw yet"
-  //       );
-  //     });
-
-  //     it("Should revert with the right error if called from another account", async function () {
-  //       const { lock, unlockTime, otherAccount } = await loadFixture(
-  //         deployOneYearLockFixture
-  //       );
-
-  //       // We can increase the time in Hardhat Network
-  //       await time.increaseTo(unlockTime);
-
-  //       // We use lock.connect() to send a transaction from another account
-  //       await expect(lock.connect(otherAccount).withdraw()).to.be.revertedWith(
-  //         "You aren't the owner"
-  //       );
-  //     });
-
-  //     it("Shouldn't fail if the unlockTime has arrived and the owner calls it", async function () {
-  //       const { lock, unlockTime } = await loadFixture(
-  //         deployOneYearLockFixture
-  //       );
-
-  //       // Transactions are sent using the first signer by default
-  //       await time.increaseTo(unlockTime);
-
-  //       await expect(lock.withdraw()).not.to.be.reverted;
-  //     });
-  //   });
-
-  //   describe("Events", function () {
-  //     it("Should emit an event on withdrawals", async function () {
-  //       const { lock, unlockTime, lockedAmount } = await loadFixture(
-  //         deployOneYearLockFixture
-  //       );
-
-  //       await time.increaseTo(unlockTime);
-
-  //       await expect(lock.withdraw())
-  //         .to.emit(lock, "Withdrawal")
-  //         .withArgs(lockedAmount, anyValue); // We accept any value as `when` arg
-  //     });
-  //   });
-
-  //   describe("Transfers", function () {
-  //     it("Should transfer the funds to the owner", async function () {
-  //       const { lock, unlockTime, lockedAmount, owner } = await loadFixture(
-  //         deployOneYearLockFixture
-  //       );
-
-  //       await time.increaseTo(unlockTime);
-
-  //       await expect(lock.withdraw()).to.changeEtherBalances(
-  //         [owner, lock],
-  //         [lockedAmount, -lockedAmount]
-  //       );
-  //     });
-  //   });
-  // });
-});
+  

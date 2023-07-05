@@ -24,10 +24,9 @@ contract Zap is IZap {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    address WETH;
-
-    address public swapRouter = 0x1b81D678ffb9C0263b24A97847620C99d213eB14;
-    address public positionManager = 0x46A15B0b27311cedF172AB29E4f4766fbE7F4364;
+    address public immutable WETH = 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
+    address public immutable swapRouter = 0x1b81D678ffb9C0263b24A97847620C99d213eB14;
+    address public immutable positionManager = 0x46A15B0b27311cedF172AB29E4f4766fbE7F4364;
 
     function zapInSingle(
         address vault,
