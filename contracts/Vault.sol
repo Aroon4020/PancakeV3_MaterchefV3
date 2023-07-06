@@ -14,12 +14,15 @@ import "@pancakeswap/v3-core/contracts/interfaces/IPancakeV3Pool.sol";
 import "@pancakeswap/v3-periphery/contracts/libraries/LiquidityAmounts.sol";
 import "@pancakeswap/v3-core/contracts/libraries/TickMath.sol";
 import "./interfaces/common/IMCV3.sol";
-import "./interfaces/IVault.sol";
 
+import "./interfaces/common/IWETH.sol";
+import "./interfaces/IVault.sol";
+import "./libraries/Liquidity.sol";
 import "./libraries/Swap.sol";
 
-import "./libraries/Liquidity.sol";
+
 import "./vaultToken/ERC20.sol";
+import "hardhat/console.sol";
 
 contract Vault is ERC20, IVault, Ownable, Pausable {
     using SafeMath for uint256;
@@ -30,7 +33,7 @@ contract Vault is ERC20, IVault, Ownable, Pausable {
     uint256 public immutable FEE = 250;
     uint256 public immutable REMAINING_AMOUNT = 9500;
     uint256 public immutable MINIMUM_LIQUIDITY = 10 ** 3;
-    address public immutable masterchefV3 = 0x556B9306565093C855AEA9AE92A594704c2Cd59e;
+    address public constant masterchefV3 = 0x556B9306565093C855AEA9AE92A594704c2Cd59e;
     address public immutable cake = 0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82;
     address public immutable positionManager = 0x46A15B0b27311cedF172AB29E4f4766fbE7F4364;
     address public immutable WETH = 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
@@ -48,13 +51,11 @@ contract Vault is ERC20, IVault, Ownable, Pausable {
     constructor(
         string memory _name,
         string memory _symbol,
-        int24 _tickLower,
-        int24 _tickUpper,
         address _pool
         //address[] memory _route,
     ) ERC20(_name, _symbol,18) {
-        tickLower = _tickLower;
-        tickUpper = _tickUpper;
+        tickLower = TickMath.MIN_TICK;
+        tickUpper = TickMath.MAX_TICK;
         pool = _pool;
         fee = IPancakeV3Pool(pool).fee();
         token0 = IPancakeV3Pool(pool).token0();
@@ -66,7 +67,15 @@ contract Vault is ERC20, IVault, Ownable, Pausable {
         IERC20(token1).safeApprove(
                 router,
                 uint256(type(uint256).max)
-            );    
+            );
+        IERC20(token0).safeApprove(
+                masterchefV3,
+                uint256(type(uint256).max)
+            );
+        IERC20(token1).safeApprove(
+                masterchefV3,
+                uint256(type(uint256).max)
+            );        
         // for (uint256 i; i < _approveToken.length; ++i) {
         //     IERC20(_approveToken[i]).safeApprove(
         //         router,
@@ -78,45 +87,81 @@ contract Vault is ERC20, IVault, Ownable, Pausable {
     }
 
     function initializeVault(
-        uint256 amount0Desired,
-        uint256 amount1Desired,
+        uint256 amount0,
+        uint256 amount1,
         uint256 amount0Min,
         uint256 amount1Min
     ) external payable onlyOwner {
-        pay(token0, amount0Desired);
-        pay(token1, amount1Desired);
+        console.log(token0);
+        console.log(token1);
+        pay(token0, amount0);
+        pay(token1, amount1);
+        //console.log(IERC20(token0).balanceOf(address(this)));
+        //IWETH(WETH).deposit{value:msg.value}();
+        console.log(IERC20(WETH).balanceOf(address(this)));
+        // IERC20(token0).transfer(positionManager,amount0Desired);
+        // positionManager.transfer(msg.value);
+        // (bool success, ) = positionManager.call{value: msg.value}("");
+        //require(success, "ETH transfer failed");
+        IERC20(token0).approve(positionManager,amount0);
+        IERC20(token1).approve(positionManager,amount1);
+
+        // INonfungiblePositionManager.MintParams
+        //     memory params = INonfungiblePositionManager.MintParams({
+        //         token0: token0,
+        //         token1: token1,
+        //         fee: fee,
+        //         tickLower: TickMath.MIN_TICK,
+        //         tickUpper: TickMath.MAX_TICK,
+        //         amount0Desired: amount0,
+        //         amount1Desired: amount1,
+        //         amount0Min: 0,
+        //         amount1Min: 0,
+        //         recipient: address(this),
+        //         deadline: block.timestamp+100
+        //     });
+
+        // (
+        //     uint256 _tokenId,
+        //     ,
+        //     uint256 amount0,
+        //     uint256 amount1
+        // ) = INonfungiblePositionManager(positionManager).mint(
+        //         params
+        //     );
+        console.log("fee",fee);
         INonfungiblePositionManager.MintParams
             memory params = INonfungiblePositionManager.MintParams({
                 token0: token0,
                 token1: token1,
                 fee: fee,
-                tickLower: tickLower,
-                tickUpper: tickUpper,
-                amount0Desired: amount0Desired,
-                amount1Desired: amount1Desired,
-                amount0Min: amount0Min,
-                amount1Min: amount1Min,
+                // By using TickMath.MIN_TICK and TickMath.MAX_TICK, 
+                // we are providing liquidity across the whole range of the pool. 
+                // Not recommended in production.
+                tickLower: -58200,//TickMath.MIN_TICK,
+                tickUpper: -44200,//TickMath.MAX_TICK,
+                amount0Desired: amount0,
+                amount1Desired: amount1,
+                amount0Min: 0,
+                amount1Min: 0,
                 recipient: address(this),
                 deadline: block.timestamp
             });
 
-        (
-            uint256 _tokenId,
-            ,
-            uint256 amount0,
-            uint256 amount1
-        ) = INonfungiblePositionManager(positionManager).mint{value: msg.value}(
-                params
-            );
+        // Note that the pool defined by DAI/USDC and fee tier 0.01% must 
+        // already be created and initialized in order to mint
+        (uint256 _tokenId,, uint256 _amount0,uint256 _amount1) = INonfungiblePositionManager(positionManager)
+            .mint{value:msg.value}(params);
+        tokenId = _tokenId;
         INonfungiblePositionManager(positionManager).approve(masterchefV3,_tokenId);    
         INonfungiblePositionManager(positionManager).transferFrom(
             address(this),
             masterchefV3,
             _tokenId
         );
-        uint256 shareAmount = calculateshareAmount(amount0, amount1);
+        uint256 shareAmount = calculateshareAmount(_amount0, _amount1);
         _mint(msg.sender, shareAmount);
-        tokenId = _tokenId;
+        
         _unpause();
     }
 
@@ -126,7 +171,7 @@ contract Vault is ERC20, IVault, Ownable, Pausable {
         uint256 amount0Min,
         uint256 amount1Min,
         address recipient
-    ) external payable override whenNotPaused returns (uint256 shareAmount) {
+    ) public payable override whenNotPaused returns (uint256 shareAmount) {
         pay(token0, amount0);
         pay(token1, amount1);
         IMCV3.IncreaseLiquidityParams memory increaseLiquidityParams = IMCV3
@@ -141,6 +186,40 @@ contract Vault is ERC20, IVault, Ownable, Pausable {
         IMCV3(masterchefV3).increaseLiquidity(increaseLiquidityParams);
         shareAmount = calculateshareAmount(amount0, amount1);
         _mint(recipient, shareAmount);
+    }
+
+    function addLiquiditySingle(address tokenIn, uint256 amountIn,uint256 amountOutMin) external payable{
+        require(tokenIn==token1||tokenIn==token0,"token Not supported");
+        pay(tokenIn,amountIn);
+        (uint256 res0, uint256 res1) = Liquidity.getAmountsForLiquidity(
+            pool,
+            positionManager,
+            tokenId,
+            tickLower,
+            tickUpper
+        );
+        bool isInputA = token0 == tokenIn;
+        uint256 amountToSwap = isInputA
+            ? Swap.calculateSwapInAmount(res0, amountIn, fee)
+            : Swap.calculateSwapInAmount(res1, amountIn, fee);
+        Swap.singleSwap(
+            tokenIn,
+            token0 == tokenIn?token1:token0,
+            amountToSwap,
+            amountOutMin,
+            fee,
+            router
+        );
+        uint256 amount0 = IERC20(token0).balanceOf(address(this));
+        uint256 amount1 = IERC20(token1).balanceOf(address(this));
+        addLiquidity(
+            amount0,
+            amount1,
+            (amount0 * 100) / 10_000,
+            (amount1 * 100) / 10_000,
+            msg.sender
+        );
+
     }
 
     function removeLiquidity(
@@ -381,5 +460,21 @@ contract Vault is ERC20, IVault, Ownable, Pausable {
         } else {
             IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
         }
+    }
+    function onERC721Received(
+        address ,
+        address,
+        uint _tokId,
+        bytes calldata
+    ) external returns (bytes4) {
+        console.log("!!!!!!!!!!!!!");
+        //_createDeposit(operator, _tokenId);
+        return this.onERC721Received.selector;
+    }
+    fallback() external payable{
+        console.log("3333");
+    }
+    receive() external payable{
+
     }
 }

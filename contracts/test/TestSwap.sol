@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.7.6;
 pragma abicoder v2;
-import "@pancakeswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+import "../interfaces/common/IV3SwapRouter.sol";
 import "@uniswap/lib/contracts/libraries/Babylonian.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
-
-library Swap {
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "hardhat/console.sol";
+contract TestSwap {
 
     using SafeMath for uint256;
     function singleSwap(
@@ -15,36 +16,40 @@ library Swap {
         uint256 amountOutMinimum,
         uint24 fee,
         address router
-    ) internal returns (uint256 amountOut) {
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+    ) external payable {
+        IV3SwapRouter.ExactInputSingleParams memory params = IV3SwapRouter
             .ExactInputSingleParams({
                 tokenIn: tokenIn,
                 tokenOut: tokenOut,
                 fee: fee,
-                recipient: address(this), // Send the output tokens to this contract
-                deadline: block.timestamp,
+                recipient: msg.sender,
                 amountIn: amountToSwap,
                 amountOutMinimum: amountOutMinimum,
                 sqrtPriceLimitX96: 0 // No price limit
             });
-        return ISwapRouter(router).exactInputSingle{value: amountToSwap}(params);
+            console.log("###############3");
+        IV3SwapRouter(router).exactInputSingle{value: msg.value}(params);
+        //ISwapRouter(router).refundETH();
+        (bool success,) = msg.sender.call{ value: address(this).balance }("");
+        require(success, "refund failed");
+
     }
 
-    function batchSwap(
-        uint256 amountToSwap,
-        uint256 amountOutMinimum,
-        bytes calldata route,
-        address router
-    ) internal returns (uint256 amountOut) {
-        ISwapRouter.ExactInputParams memory params = ISwapRouter.ExactInputParams({
-            path:route,
-            recipient: address(this), // Send the output tokens to this contract
-            deadline: block.timestamp,
-            amountIn: amountToSwap,
-            amountOutMinimum: amountOutMinimum
-        });
-        return ISwapRouter(router).exactInput{value: amountToSwap}(params);
-    }
+    // function batchSwap(
+    //     uint256 amountToSwap,
+    //     uint256 amountOutMinimum,
+    //     bytes calldata route,
+    //     address router
+    // ) external payable returns (uint256 amountOut) {
+    //     ISwapRouter.ExactInputParams memory params = ISwapRouter.ExactInputParams({
+    //         path:route,
+    //         recipient: msg.sender, // Send the output tokens to this contract
+    //         deadline: block.timestamp,
+    //         amountIn: amountToSwap,
+    //         amountOutMinimum: amountOutMinimum
+    //     });
+    //     return ISwapRouter(router).exactInput{value: amountToSwap}(params);
+    // }
 
 
     function calculateSwapInAmount(

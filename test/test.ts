@@ -1,14 +1,10 @@
-import {
-  time,
-  loadFixture,
-} from "@nomicfoundation/hardhat-toolbox/network-helpers";
-import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
+import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { parse } from "path";
-import { parseEther } from "ethers";
-import { ethers } from "hardhat";
-import { expect } from "chai";
+import { parseEther } from "ethers/lib/utils";
+
+// import { ethers } from "hardhat";
+// import { expect } from "chai";
 async function _advanceBlock() {
   return ethers.provider.send("evm_mine", []);
 }
@@ -31,57 +27,60 @@ async function deployZAP() {
   return { zap };
 }
 
+async function deploySWap() {
+  const Swap = await ethers.getContractFactory("TestSwap");
+  const swap = await Swap.deploy();
+  return { swap };
+}
+
 async function deploy_CAKE_ETH_Vault() {
   let name = "A";
   let sysmbol = "B";
-  let tickLower = "111";
-  let tickUpper = "111";
+  let tickLower = "-887272";
+  let tickUpper = "887272";
   let pool = "0x133B3D95bAD5405d14d53473671200e9342896BF"
-  // let route0 = [
-  //   "0xd4d42F0b6DEF4CE0383636770eF773390d85c61A",
-  //   "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
-  // ];
-  // let approveToken = [
-  //   "0x3082CC23568eA640225c2467653dB90e9250AaA0",
-  //   "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
-  //   "0xd4d42F0b6DEF4CE0383636770eF773390d85c61A",
-  // ];
   const [user0] = await ethers.getSigners();
   const SwapLib = await ethers.getContractFactory("Swap");
   const swaplib = await SwapLib.deploy();
-  let a = await swaplib.getAddress();
-  console.log(a);
-  console.log(swaplib);
-  // const LiquidityLib = await ethers.getContractFactory("Liquidity");
-  // const liquiditylib = await LiquidityLib.deploy();
-  //liquiditylib.address
-  //await liquiditylib.deployed
-  // const VAULT = await ethers.getContractFactory("Vault",{
-  //   libraries:{
-  //     Liquidity:"0x133B3D95bAD5405d14d53473671200e9342896BF",
-  //     Swap:"0x133B3D95bAD5405d14d53473671200e9342896BF",
-  //   },
-  // });
-  // const vault = await VAULT.deploy(
-  //   name,
-  //   sysmbol,
-  //   tickLower,
-  //   tickUpper,
-  //   pool,
-  // );
-  //await ethers.provider.getSigner().link(vault.address, swaplib.address,liquiditylib.address);
-  //vault.address
-  // const [, signer0] = await ethers.getSigners();
-  // const txSigner0 = vault.connect(signer0);
+  //let a = await swaplib.getAddress();
+  const LiquidityLib = await ethers.getContractFactory("Liquidity");
+  const liquiditylib = await LiquidityLib.deploy();
+  //let b = await liquiditylib.getAddress();
+  const VAULT = await ethers.getContractFactory("Vault",{
+    // libraries:{
+    //   Swap:a,
+    //   //Liquidity:b,
+      
+    // },
+  });
+  const vault = await VAULT.deploy(
+    name,
+    sysmbol,
+    pool,
+  );
+  let token1 = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";//WBNB
+  let token0 = "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82";//cake
+  let router = "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4";
+  const ERC20 = await ethers.getContractFactory("TESTERC20");
+  const lp0 = await ERC20.attach("0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82");
+  const lp1 = await ERC20.attach("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c");
 
-  return { swaplib};
+  return { vault,token0,token1,lp0,lp1,router};
 }
 
 
 
   describe("ZAP and VAULT", function () {
     it("test Vault",async () => {
-      const { vault } = await loadFixture(deploy_CAKE_ETH_Vault);
+      const [user0] = await ethers.getSigners();
+      const {swap} =  await loadFixture(deploySWap);
+      const { vault,token0,token1,lp0,lp1,router } = await loadFixture(deploy_CAKE_ETH_Vault);
+      await swap.singleSwap(token1,token0,parseEther("10"),1,"2500",router,{value: parseEther("10")});
+      await lp0.approve(vault.address,parseEther("100000000"));
+      let x = await vault.initializeVault(parseEther("100"),parseEther("100"),parseEther("100"),parseEther("100"),{value:parseEther("100")});
+      //console.log(x)
+      //await vault.initializeVault(0,0,0,0);
+      // vault.s
       //await lock.zapIn("0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c","0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82",2500,-58800,-44300, parseEther("1"),0,{value:parseEther("1")});
     })
     // it("Should set the right unlockTime", async function () {

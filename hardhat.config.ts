@@ -13,7 +13,7 @@ const config: HardhatUserConfig = {
     hardhat:{
       forking: {
         url: "https://compatible-still-liquid.bsc.discover.quiknode.pro/fa2e4bdba8c837b245a4a295301dedb23a7936ab/",
-        blockNumber: 29116283,
+        blockNumber: 29722936,
       },
     },
   },
