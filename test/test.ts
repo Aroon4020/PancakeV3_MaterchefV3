@@ -1,5 +1,5 @@
 import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { expect } from "chai";
+import { expect, use } from "chai";
 import { ethers } from "hardhat";
 import { parseEther } from "ethers/lib/utils";
 
@@ -48,7 +48,7 @@ async function deploy_CAKE_ETH_Vault() {
   //let b = await liquiditylib.getAddress();
   const VAULT = await ethers.getContractFactory("Vault",{
     // libraries:{
-    //   Swap:a,
+    //   Swap:swaplib.address,
     //   //Liquidity:b,
       
     // },
@@ -72,12 +72,18 @@ async function deploy_CAKE_ETH_Vault() {
 
   describe("ZAP and VAULT", function () {
     it("test Vault",async () => {
-      const [user0] = await ethers.getSigners();
+      const [user0,user1] = await ethers.getSigners();
       const {swap} =  await loadFixture(deploySWap);
       const { vault,token0,token1,lp0,lp1,router } = await loadFixture(deploy_CAKE_ETH_Vault);
       await swap.singleSwap(token1,token0,parseEther("10"),1,"2500",router,{value: parseEther("10")});
       await lp0.approve(vault.address,parseEther("100000000"));
-      let x = await vault.initializeVault(parseEther("100"),parseEther("100"),parseEther("100"),parseEther("100"),{value:parseEther("100")});
+      let x = await vault.initializeVault(parseEther("100"),parseEther("100"),parseEther("0.1"),parseEther("0.1"),{value:parseEther("100")});
+      //await vault.zapOut(vault.balanceOf(user0.address),0,0,user0.address);
+      await vault.connect(user1).zapInSingle(token1,parseEther("1"),0,{value:parseEther("1")});
+      await vault.zapInDual(lp0.balanceOf(user0.address),parseEther("1"),0,0,{value:parseEther("1")});
+      await vault.zapOut(vault.balanceOf(user0.address),0,0);
+      await vault.connect(user1).zapOutAndSwap(vault.balanceOf(user1.address),0,0,token1,0);
+      //await vault.pauseAndWithdrawNFT();
       //console.log(x)
       //await vault.initializeVault(0,0,0,0);
       // vault.s

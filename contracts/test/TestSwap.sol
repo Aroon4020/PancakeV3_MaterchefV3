@@ -29,10 +29,8 @@ contract TestSwap {
             });
             console.log("###############3");
         IV3SwapRouter(router).exactInputSingle{value: msg.value}(params);
-        //ISwapRouter(router).refundETH();
         (bool success,) = msg.sender.call{ value: address(this).balance }("");
         require(success, "refund failed");
-
     }
 
     // function batchSwap(
