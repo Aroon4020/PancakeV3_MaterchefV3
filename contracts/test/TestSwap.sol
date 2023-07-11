@@ -6,9 +6,10 @@ import "@uniswap/lib/contracts/libraries/Babylonian.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "hardhat/console.sol";
-contract TestSwap {
 
+contract TestSwap {
     using SafeMath for uint256;
+
     function singleSwap(
         address tokenIn,
         address tokenOut,
@@ -27,31 +28,12 @@ contract TestSwap {
                 amountOutMinimum: amountOutMinimum,
                 sqrtPriceLimitX96: 0 // No price limit
             });
-            console.log("###############3");
         IV3SwapRouter(router).exactInputSingle{value: msg.value}(params);
-        (bool success,) = msg.sender.call{ value: address(this).balance }("");
+        (bool success, ) = msg.sender.call{value: address(this).balance}("");
         require(success, "refund failed");
     }
 
-    // function batchSwap(
-    //     uint256 amountToSwap,
-    //     uint256 amountOutMinimum,
-    //     bytes calldata route,
-    //     address router
-    // ) external payable returns (uint256 amountOut) {
-    //     ISwapRouter.ExactInputParams memory params = ISwapRouter.ExactInputParams({
-    //         path:route,
-    //         recipient: msg.sender, // Send the output tokens to this contract
-    //         deadline: block.timestamp,
-    //         amountIn: amountToSwap,
-    //         amountOutMinimum: amountOutMinimum
-    //     });
-    //     return ISwapRouter(router).exactInput{value: amountToSwap}(params);
-    // }
-
-
     function calculateSwapInAmount(
-        //0.01% Fee
         uint256 reserveIn,
         uint256 userIn,
         uint24 _fee
@@ -92,5 +74,4 @@ contract TestSwap {
             revert("invalid fee");
         }
     }
-    
 }

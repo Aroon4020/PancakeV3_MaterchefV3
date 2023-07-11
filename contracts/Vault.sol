@@ -4,7 +4,6 @@ pragma abicoder v2;
 import "@pancakeswap/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
 import "@pancakeswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "@uniswap/lib/contracts/libraries/Babylonian.sol";
-
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
@@ -16,7 +15,6 @@ import "@pancakeswap/v3-core/contracts/interfaces/IPancakeV3Pool.sol";
 import "@pancakeswap/v3-periphery/contracts/libraries/LiquidityAmounts.sol";
 import "@pancakeswap/v3-core/contracts/libraries/TickMath.sol";
 import "./interfaces/common/IMCV3.sol";
-
 import "./interfaces/common/IWETH.sol";
 import "./interfaces/IVault.sol";
 import "./libraries/Liquidity.sol";
@@ -69,13 +67,11 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
 
     function onERC721Received(
         address,
-        address _from,
-        uint256 _tokenId,
+        address,
+        uint256,
         bytes calldata
-    ) external {}
-
-    fallback() external{
-
+    ) external pure returns (bytes4) {
+        return this.onERC721Received.selector;
     }
 
     function initializeVault(
@@ -89,17 +85,24 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         address _cake = cake;
         address _NFTPostionManager = positionManager;
         address _masterchefV3 = masterchefV3;
-        pay(_token0, amount0);
-        pay(_token1, amount1);
-        IERC20(_token0).safeApprove(_NFTPostionManager, amount0);
-        IERC20(_token1).safeApprove(_NFTPostionManager, amount1);
+        address _router = router;
+        _pay(_token0, amount0);
+        _pay(_token1, amount1);
+        IERC20(_token0).safeApprove(
+            _NFTPostionManager,
+            uint256(type(uint256).max)
+        );
+        IERC20(_token1).safeApprove(
+            _NFTPostionManager,
+            uint256(type(uint256).max)
+        );
         INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager
             .MintParams({
                 token0: _token0,
                 token1: _token1,
                 fee: fee,
                 tickLower: -58200, //TickMath.MIN_TICK,
-                tickUpper: -44200, //TickMath.MAX_TICK,
+                tickUpper: -44200, //,TickMath.MAX_TICK
                 amount0Desired: amount0,
                 amount1Desired: amount1,
                 amount0Min: amount0Min,
@@ -124,20 +127,18 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
             _tokenId
         );
         if (_token0 != _cake && _token1 != _cake)
-            IERC20(_cake).safeApprove(router, uint256(type(uint256).max));
+            IERC20(_cake).safeApprove(_router, uint256(type(uint256).max));
 
         uint256 token0Left = amount0 - _amount0;
         uint256 token1Left = amount1 - _amount1;
-        if (token0Left > 0) refund(_token0, token0Left);
-        if (token1Left > 0) refund(_token1, token1Left);
-        IERC20(_token0).safeApprove(router, uint256(type(uint256).max));
-        IERC20(_token1).safeApprove(router, uint256(type(uint256).max));
-        IERC20(_token0).safeApprove(masterchefV3, uint256(type(uint256).max));
-        IERC20(_token1).safeApprove(masterchefV3, uint256(type(uint256).max));
-        uint256 shareAmount = calculateshareAmount(_amount0, _amount1);
-        _mint(msg.sender, shareAmount);
+        if (token0Left > 0) _refund(_token0, token0Left);
+        if (token1Left > 0) _refund(_token1, token1Left);
+        IERC20(_token0).safeApprove(_router, uint256(type(uint256).max));
+        IERC20(_token1).safeApprove(_router, uint256(type(uint256).max));
+        IERC20(_token0).safeApprove(_masterchefV3, uint256(type(uint256).max));
+        IERC20(_token1).safeApprove(_masterchefV3, uint256(type(uint256).max));
+        _mint(msg.sender, _calculateshareAmount(_amount0, _amount1));
         _unpause();
-        
     }
 
     function zapInDual(
@@ -145,26 +146,41 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         uint256 amount1,
         uint256 amount0Min,
         uint256 amount1Min
-    ) public payable override whenNotPaused nonReentrant returns (uint256 shareAmount) {
-        pay(token0, amount0);
-        pay(token1, amount1);
+    )
+        external
+        payable
+        override
+        whenNotPaused
+        nonReentrant
+        returns (uint256 shareAmount)
+    {
+        _pay(token0, amount0);
+        _pay(token1, amount1);
         (uint256 _amount0, uint256 _amount1) = _addLiquidity(
             amount0,
             amount1,
             amount0Min,
             amount1Min
         );
-        shareAmount = calculateshareAmount(_amount0, _amount1);
+        shareAmount = _calculateshareAmount(_amount0, _amount1);
         _mint(msg.sender, shareAmount);
+        emit Deposited(msg.sender, amount0, amount1, shareAmount);
     }
 
     function zapInSingle(
         address tokenIn,
         uint256 amountIn,
         uint256 amountOutMin
-    ) public payable override nonReentrant returns (uint256 shareAmount) {
+    )
+        external
+        payable
+        override
+        whenNotPaused
+        nonReentrant
+        returns (uint256 shareAmount)
+    {
         require(tokenIn == token1 || tokenIn == token0, "token Not supported");
-        pay(tokenIn, amountIn);
+        _pay(tokenIn, amountIn);
         (uint256 amount0, uint256 amount1) = _getOptimalDualAssets(
             tokenIn,
             amountIn,
@@ -173,23 +189,25 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         (uint256 _amount0, uint256 _amount1) = _addLiquidity(
             amount0,
             amount1,
-            (amount0 * 100) / 10_000,
-            (amount1 * 100) / 10_000
+            0,
+            0
         );
 
-        shareAmount = calculateshareAmount(_amount0, _amount1);
+        shareAmount = _calculateshareAmount(_amount0, _amount1);
         _mint(msg.sender, shareAmount);
+        emit Deposited(msg.sender, amount0, amount1, shareAmount);
     }
 
     function zapOut(
         uint128 amount,
         uint256 amount0Min,
         uint256 amount1Min
-    ) public override nonReentrant returns (uint256 amount0, uint256 amount1) {
+    ) external override nonReentrant returns (uint256 amount0, uint256 amount1) {
         _burn(msg.sender, uint256(amount));
         (amount0, amount1) = _removeLiquidity(amount, amount0Min, amount1Min);
-        refund(token0, amount0);
-        refund(token1, amount1);
+        _refund(token0, amount0);
+        _refund(token1, amount1);
+        emit Withdrawn(amount, msg.sender, amount0, amount1);
     }
 
     function zapOutAndSwap(
@@ -198,68 +216,109 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         uint256 amount1Min,
         address desiredToken,
         uint256 amountOutMin
-    ) public override nonReentrant {
+    ) external override nonReentrant {
         _burn(msg.sender, uint256(amount));
         (uint256 _amount0, uint256 _amount1) = _removeLiquidity(
             amount,
             amount0Min,
             amount1Min
         );
-        //refactoring required!!!!
+        address _token0 = token0;
+        address _token1 = token1;
         require(
-            desiredToken == token0 || desiredToken == token1,
+            desiredToken == _token0 || desiredToken == _token1,
             "token not supported"
         );
-        address swapToken = token1 == desiredToken ? token0 : token1;
-        uint256 amountToSwap = swapToken == token0 ? _amount0 : _amount1;
+        address swapToken = _token1 == desiredToken ? _token0 : _token1;
+        uint256 amountToSwap = swapToken == _token0 ? _amount0 : _amount1;
         uint256 remainingAmount = amountToSwap == _amount0
             ? _amount1
             : _amount0;
-        refund(
+        _refund(
             desiredToken,
-            swap(swapToken, desiredToken, amountToSwap, amountOutMin) +
+            _swap(swapToken, desiredToken, amountToSwap, amountOutMin) +
                 remainingAmount
         );
+        emit Withdrawn(amount, msg.sender, _amount0, _amount1);
     }
 
     function harvest(
-        uint256 amountOut,
+        address tokenOut,
+        uint256 amountOutMin,
         uint256 amount0Min,
         uint256 amount1Min,
-        uint256 amountOut1,
-        bytes calldata route
+        uint24 _fee
     ) external override nonReentrant {
-        uint256 reward = IMCV3(masterchefV3).harvest(tokenId, address(this));
-        address _cake = cake;
-        address lpToken0 = token0;
-        address lpToken1 = token1;
-        require(reward > 0, "Zero Harvest Amount");
-        if (_cake != lpToken0 && _cake != lpToken1) {
-            Swap.batchSwap(reward, amountOut, route, router);
-            _arrangeAddliquidityObject(
-                abi.decode(route[20:40], (address)), //find correct one
-                lpToken0,
-                lpToken1,
-                amountOut1
-            );
-        } else {
-            _arrangeAddliquidityObject(_cake, lpToken0, lpToken1, amountOut1);
-        }
+        address _token0 = token0;
+        address _token1 = token1;
+
+        _handleReward(
+            _chargeFees(
+                cake,
+                IMCV3(masterchefV3).harvest(tokenId, address(this))
+            ),
+            _token0,
+            _token1,
+            tokenOut,
+            amountOutMin,
+            _fee
+        );
         _addLiquidity(
-            IERC20(lpToken0).balanceOf(address(this)),
-            IERC20(lpToken1).balanceOf(address(this)),
+            IERC20(_token0).balanceOf(address(this)),
+            IERC20(_token1).balanceOf(address(this)),
             amount0Min,
             amount1Min
         );
     }
 
-    function pauseAndWithdrawNFT() public override whenNotPaused nonReentrant onlyOwner {
+    function pauseAndWithdrawNFT(
+        address tokenOut,
+        uint256 amountOutMin,
+        uint256 amount0Min,
+        uint256 amount1Min,
+        uint24 _fee
+    ) external override whenNotPaused nonReentrant onlyOwner {
         _pause();
-        //why it fails!!!!!
-        IMCV3(masterchefV3).withdraw(tokenId, address(this));
+
+        uint256 reward = IMCV3(masterchefV3).withdraw(tokenId, address(this));
+        if (reward > 0) {
+            address _token0 = token0;
+            address _token1 = token1;
+            _handleReward(
+                reward,
+                _token0,
+                _token1,
+                tokenOut,
+                amountOutMin,
+                _fee
+            );
+            INonfungiblePositionManager.IncreaseLiquidityParams
+                memory params = INonfungiblePositionManager
+                    .IncreaseLiquidityParams({
+                        tokenId: tokenId,
+                        amount0Desired: IERC20(_token0).balanceOf(
+                            address(this)
+                        ),
+                        amount1Desired: IERC20(_token1).balanceOf(
+                            address(this)
+                        ),
+                        amount0Min: amount0Min,
+                        amount1Min: amount1Min,
+                        deadline: block.timestamp
+                    });
+            INonfungiblePositionManager(positionManager).increaseLiquidity(
+                params
+            );
+        }
     }
 
-    function unpauseAndDepositNFT() external override whenPaused nonReentrant onlyOwner {
+    function unpauseAndDepositNFT()
+        external
+        override
+        whenPaused
+        nonReentrant
+        onlyOwner
+    {
         _unpause();
         address _NFTPositionManager = positionManager;
         address _masterchefV3 = masterchefV3;
@@ -280,7 +339,7 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         uint128 amount,
         uint256 amount0Min,
         uint256 amount1Min
-    ) public override whenPaused nonReentrant {
+    ) external override whenPaused nonReentrant {
         uint256 _tokenId = tokenId;
         address NFTPositionManager = positionManager;
         _burn(msg.sender, amount);
@@ -289,7 +348,7 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
             memory decreaseLiquidityParams = INonfungiblePositionManager
                 .DecreaseLiquidityParams({
                     tokenId: _tokenId,
-                    liquidity: calculateWithdrawShare(amount),
+                    liquidity: _calculateWithdrawShare(amount),
                     amount0Min: amount0Min,
                     amount1Min: amount1Min,
                     deadline: block.timestamp
@@ -310,36 +369,54 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         (amount0, amount1) = INonfungiblePositionManager(NFTPositionManager)
             .collect(collectParams);
 
-        refund(token0, amount0);
-        refund(token1, amount1);
+        _refund(token0, amount0);
+        _refund(token1, amount1);
     }
 
-    function pauseVault() public override onlyOwner {
+    function pauseVault() external override onlyOwner {
         _pause();
     }
 
-    function unpauseVault() public override onlyOwner {
+    function unpauseVault() external override onlyOwner {
         _unpause();
     }
 
-    function _getOptimalDualAssets(
-        address tokenIn,
-        uint256 amountIn,
-        uint256 amountOutMin
-    ) internal returns (uint256 amount0, uint256 amount1) {
-        address _token0 = token0;
-        uint24 _fee = fee;
-        (uint256 res0, uint256 res1) = _getReservers();
-        bool isInputA = _token0 == tokenIn;
-        uint256 amountToSwap = isInputA
-            ? Swap.calculateSwapInAmount(res0, amountIn, _fee)
-            : Swap.calculateSwapInAmount(res1, amountIn, _fee);
-        if (_token0 == tokenIn) {
-            amount0 = amountIn - amountToSwap;
-            amount1 = swap(tokenIn, token1, amountToSwap, amountOutMin);
+    function _handleReward(
+        uint256 reward,
+        address _token0,
+        address _token1,
+        address tokenOut,
+        uint256 amountOutMin,
+        uint24 _fee
+    ) internal {
+        address _cake = cake;
+        require(
+            tokenOut == _token0 || tokenOut == _token1,
+            "Token Out Not Supported"
+        );
+        if (_cake != _token0 && _cake != _token1) {
+            _arrangeAddliquidityObject(
+                Swap.singleSwap(
+                    _cake,
+                    tokenOut,
+                    reward,
+                    amountOutMin,
+                    _fee,
+                    router
+                ),
+                tokenOut,
+                _token0,
+                _token1,
+                amountOutMin
+            );
         } else {
-            amount0 = swap(tokenIn, _token0, amountToSwap, amountOutMin);
-            amount1 = amountIn - amountToSwap;
+            _arrangeAddliquidityObject(
+                reward,
+                _cake,
+                _token0,
+                _token1,
+                amountOutMin
+            );
         }
     }
 
@@ -363,9 +440,9 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         );
         uint256 token0Left = amount0 - _amount0;
         uint256 token1Left = amount1 - _amount1;
-        if (token0Left > 0) refund(token0, token0Left);
+        if (token0Left > 0) _refund(token0, token0Left);
 
-        if (token1Left > 0) refund(token1, token1Left);
+        if (token1Left > 0) _refund(token1, token1Left);
     }
 
     function _removeLiquidity(
@@ -377,7 +454,7 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         IMCV3.DecreaseLiquidityParams memory decreaseLiquidityParams = IMCV3
             .DecreaseLiquidityParams({
                 tokenId: tokenId,
-                liquidity: calculateWithdrawShare(amount),
+                liquidity: _calculateWithdrawShare(amount),
                 amount0Min: amount0Min,
                 amount1Min: amount1Min,
                 deadline: block.timestamp
@@ -396,6 +473,7 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
     }
 
     function _arrangeAddliquidityObject(
+        uint256 amount,
         address tokenIn,
         address _token0,
         address _token1,
@@ -410,35 +488,21 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         );
         uint24 _fee = fee;
         _token0 == tokenIn
-            ? swap(
+            ? _swap(
                 _token0,
                 _token1,
-                Swap.calculateSwapInAmount(
-                    res0,
-                    _chargeFees(
-                        tokenIn,
-                        IERC20(tokenIn).balanceOf(address(this))
-                    ),
-                    _fee
-                ),
+                Swap.calculateSwapInAmount(res0, amount, _fee),
                 amountOut1
             )
-            : swap(
+            : _swap(
                 _token1,
                 _token0,
-                Swap.calculateSwapInAmount(
-                    res1,
-                    _chargeFees(
-                        tokenIn,
-                        IERC20(tokenIn).balanceOf(address(this))
-                    ),
-                    _fee
-                ),
+                Swap.calculateSwapInAmount(res1, amount, _fee),
                 amountOut1
             );
     }
 
-    function swap(
+    function _swap(
         address tokenIn,
         address tokenOut,
         uint256 amountIn,
@@ -454,7 +518,30 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         );
     }
 
-    function calculateWithdrawShare(
+    function _getOptimalDualAssets(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 amountOutMin
+    ) internal returns (uint256 amount0, uint256 amount1) {
+        address _token0 = token0;
+        uint24 _fee = fee;
+        (uint256 res0, uint256 res1) = _getReservers();
+        bool isInputA = _token0 == tokenIn;
+        uint256 amountToSwap = isInputA
+            ? Swap.calculateSwapInAmount(res0, amountIn, _fee)
+            : Swap.calculateSwapInAmount(res1, amountIn, _fee);
+        if (_token0 == tokenIn) {
+            amount0 = amountIn - amountToSwap;
+            amount1 = _swap(tokenIn, token1, amountToSwap, amountOutMin);
+        } else {
+            amount0 = _swap(tokenIn, _token0, amountToSwap, amountOutMin);
+            amount1 = amountIn - amountToSwap;
+        }
+    }
+
+    
+
+    function _calculateWithdrawShare(
         uint128 amount
     ) internal view returns (uint128 liquidityShare) {
         (, , , , , , , uint128 liquidity, , , , ) = INonfungiblePositionManager(
@@ -463,7 +550,7 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         liquidityShare = (liquidity * amount) / 1e20;
     }
 
-    function calculateshareAmount(
+    function _calculateshareAmount(
         uint256 amount0,
         uint256 amount1
     ) internal returns (uint256 share) {
@@ -479,7 +566,6 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
                 amount0.mul(supply) / res0,
                 amount1.mul(supply) / res1
             );
-            //liquidity = Math.min(amount0.mul(_totalSupply) / _reserve0, amount1.mul(_totalSupply) / _reserve1);
         }
     }
 
@@ -519,7 +605,7 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         );
     }
 
-    function pay(address _token, uint256 _amount) internal {
+    function _pay(address _token, uint256 _amount) internal {
         if (_token == WETH && msg.value > 0) {
             require(msg.value == _amount, "Inconsistent Amount");
             IWETH(WETH).deposit{value: _amount}();
@@ -528,7 +614,7 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         }
     }
 
-    function refund(address _token, uint256 _amount) internal {
+    function _refund(address _token, uint256 _amount) internal {
         if (_token == WETH && msg.value > 0) {
             IWETH(_token).withdraw(_amount);
             (bool success, ) = msg.sender.call{value: _amount}("");

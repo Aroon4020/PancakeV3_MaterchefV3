@@ -72,7 +72,7 @@ async function deploy_CAKE_ETH_Vault() {
 
   describe("ZAP and VAULT", function () {
     it("test Vault",async () => {
-      const [user0,user1] = await ethers.getSigners();
+      const [user0,user1,user2] = await ethers.getSigners();
       const {swap} =  await loadFixture(deploySWap);
       const { vault,token0,token1,lp0,lp1,router } = await loadFixture(deploy_CAKE_ETH_Vault);
       await swap.singleSwap(token1,token0,parseEther("10"),1,"2500",router,{value: parseEther("10")});
@@ -83,7 +83,14 @@ async function deploy_CAKE_ETH_Vault() {
       await vault.zapInDual(lp0.balanceOf(user0.address),parseEther("1"),0,0,{value:parseEther("1")});
       await vault.zapOut(vault.balanceOf(user0.address),0,0);
       await vault.connect(user1).zapOutAndSwap(vault.balanceOf(user1.address),0,0,token1,0);
-      //await vault.pauseAndWithdrawNFT();
+      await vault.connect(user2).zapInSingle(token1,parseEther("1"),0,{value:parseEther("1")});
+
+      await vault.connect(user1).zapInSingle(token1,parseEther("1"),0,{value:parseEther("1")});
+      await vault.zapInDual(lp0.balanceOf(user0.address),parseEther("1"),0,0,{value:parseEther("1")});
+      await vault.harvest(token0,0,0,0,2500);
+      await vault.pauseAndWithdrawNFT(token0,0,0,0,2500);
+      await vault.connect(user1).emergencyExit(vault.balanceOf(user2.address),0,0);
+      await vault.unpauseAndDepositNFT();
       //console.log(x)
       //await vault.initializeVault(0,0,0,0);
       // vault.s
