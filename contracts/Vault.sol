@@ -202,9 +202,18 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         uint128 amount,
         uint256 amount0Min,
         uint256 amount1Min
-    ) external override nonReentrant returns (uint256 amount0, uint256 amount1) {
+    )
+        external
+        override
+        nonReentrant
+        returns (uint256 amount0, uint256 amount1)
+    {
         _burn(msg.sender, uint256(amount));
-        (amount0, amount1) = _removeLiquidity(amount, amount0Min, amount1Min);
+        (amount0, amount1) = _removeLiquidity(
+            _calculateWithdrawShare(amount),
+            amount0Min,
+            amount1Min
+        );
         _refund(token0, amount0);
         _refund(token1, amount1);
         emit Withdrawn(amount, msg.sender, amount0, amount1);
@@ -219,7 +228,7 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
     ) external override nonReentrant {
         _burn(msg.sender, uint256(amount));
         (uint256 _amount0, uint256 _amount1) = _removeLiquidity(
-            amount,
+            _calculateWithdrawShare(amount),
             amount0Min,
             amount1Min
         );
@@ -251,7 +260,6 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
     ) external override nonReentrant {
         address _token0 = token0;
         address _token1 = token1;
-
         _handleReward(
             _chargeFees(
                 cake,
@@ -263,6 +271,13 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
             amountOutMin,
             _fee
         );
+        IMCV3.CollectParams memory collectParams = IMCV3.CollectParams({
+            tokenId: tokenId,
+            recipient: address(this),
+            amount0Max: uint128(type(uint128).max),
+            amount1Max: uint128(type(uint128).max)
+        });
+        IMCV3(masterchefV3).collect(collectParams);
         _addLiquidity(
             IERC20(_token0).balanceOf(address(this)),
             IERC20(_token1).balanceOf(address(this)),
@@ -454,7 +469,7 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         IMCV3.DecreaseLiquidityParams memory decreaseLiquidityParams = IMCV3
             .DecreaseLiquidityParams({
                 tokenId: tokenId,
-                liquidity: _calculateWithdrawShare(amount),
+                liquidity: amount,
                 amount0Min: amount0Min,
                 amount1Min: amount1Min,
                 deadline: block.timestamp
@@ -539,8 +554,6 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         }
     }
 
-    
-
     function _calculateWithdrawShare(
         uint128 amount
     ) internal view returns (uint128 liquidityShare) {
@@ -580,6 +593,25 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
         return remainingAmount;
     }
 
+    function _pay(address _token, uint256 _amount) internal {
+        if (_token == WETH && msg.value > 0) {
+            require(msg.value == _amount, "Inconsistent Amount");
+            IWETH(_token).deposit{value: _amount}();
+        } else {
+            IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
+        }
+    }
+
+    function _refund(address _token, uint256 _amount) internal {
+        if (_token == WETH && msg.value > 0) {
+            IWETH(_token).withdraw(_amount);
+            (bool success, ) = msg.sender.call{value: _amount}("");
+            if (!success) revert();
+        } else {
+            IERC20(_token).safeTransfer(msg.sender, _amount);
+        }
+    }
+
     function _calculate(
         uint256 amount
     ) internal pure returns (uint256, uint256, uint256) {
@@ -603,24 +635,5 @@ contract Vault is ERC20, IVault, Ownable, Pausable, ReentrancyGuard {
             tickLower,
             tickUpper
         );
-    }
-
-    function _pay(address _token, uint256 _amount) internal {
-        if (_token == WETH && msg.value > 0) {
-            require(msg.value == _amount, "Inconsistent Amount");
-            IWETH(WETH).deposit{value: _amount}();
-        } else {
-            IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
-        }
-    }
-
-    function _refund(address _token, uint256 _amount) internal {
-        if (_token == WETH && msg.value > 0) {
-            IWETH(_token).withdraw(_amount);
-            (bool success, ) = msg.sender.call{value: _amount}("");
-            if (!success) revert();
-        } else {
-            IERC20(_token).safeTransfer(msg.sender, _amount);
-        }
     }
 }
